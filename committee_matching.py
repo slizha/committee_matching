@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 import sys
+import math
 from dataclasses import dataclass, field
 from typing import Tuple, List, Dict, Optional
 
@@ -17,13 +18,13 @@ class Member:
 
     def recieve_offer(self, comm: Committee) -> bool:
         if self.on_a_string is None:
-            on_a_string = comm
+            self.on_a_string = comm
             return True
         elif comm == self._decide_between(
-                on_a_string, comm):
-            on_a_string.be_cut_loose(self)
-            self.rejected.append(on_a_string)
-            on_a_string = comm
+                self.on_a_string, comm):
+            self.on_a_string.be_cut_loose(self)
+            self.rejected.append(self.on_a_string)
+            self.on_a_string = comm
             return True
         else:
             self.rejected.append(comm)
@@ -44,8 +45,8 @@ class Committee:
     name: str
     open_spots: int
     preferred_members: Dict[float, Member] = \
-        field(default_factory=dict)
-    waiting_on: List[Member] = field(default_factory=list)
+        field(default_factory=dict, repr=False)
+    waiting_on: List[Member] = field(default_factory=list, repr=False)
 
     def satisfied(self) -> bool:
         return self.open_spots == len(self.waiting_on)
@@ -71,33 +72,43 @@ def load_csv(file_name: str) -> \
     df = pd.read_csv(file_name)
     members = []
     for _, row in df.iterrows():
-        member = Member(row.name)
-        member.preferred_committee.append(comms[row.first_choice])
-        member.preferred_committee.append(comms[row.second_choice])
-        member.preferred_committee.append(comms[row.third_choice])
-        member.preferred_committee.append(comms[row.fourth_choice])
-        member.preferred_committee.append(comms[row.fifth_choice])
-        member.preferred_committee.append(comms[row.sixth_choice])
+        member = Member(row['name'])
+        print("Processing", member.name)
+        for key in [
+                'first_choice', 'second_choice', 'third_choice',
+                'fourth_choice', 'fifth_choice', 'sixth_choice']:
+            if row[key] in comms:
+                member.preferred_committee.append(comms[row[key]])
+            else:
+                break
         members.append(member)
+        if member is None:
+            breakpoint()
 
         for comm in comms.values():
             if comm.name == 'N/A':
                 continue
             comm_preference = row[comm.name]
-            if comm_preference is None:
+            if type(comm_preference) == float and math.isnan(comm_preference):
                 comm_preference = float('inf')
             elif comm_preference in comm.preferred_members.keys():
                 print(comm.name, "repeated the number", comm_preference,
                       file=sys.stderr)
+                #breakpoint()
                 comm_preference += 0.1 * [
                     int(i)
                     for i in comm.preferred_members.keys()
+                    if i != float('inf')
                 ].count(comm_preference)
 
-            if comm_preference in comm.preferred_members.keys():
+            if float('inf') != comm_preference and \
+                    comm_preference in comm.preferred_members.keys():
                 raise RuntimeError("Something is very wrong.")
 
-            comm.preferred_members[comm_preference] = member
+            comm.preferred_members[
+                int(comm_preference)
+                if type(comm_preference) == str else comm_preference
+            ] = member
 
     return list(comms.values()), members
 
@@ -110,7 +121,6 @@ def generate_committees() -> Dict[str, Committee]:
         Committee('Industrial Relations', 9),
         Committee('Public Relations', 9),
         Committee('Curriculum', 9),
-        Committee('N/A', 0)
     ]
     return {c.name: c for c in committees}
 
@@ -118,12 +128,16 @@ def generate_committees() -> Dict[str, Committee]:
 def main():
     committees, members = load_csv(sys.argv[1])
 
-    while any(not c.satisfied() for c in committees):
+    while any(not c.satisfied() for c in committees) or \
+            all(m.on_a_string is not None for m in members):
         for committee in committees:
             committee.propose_to_next_member()
 
     for member in members:
-        print(member.name, "is on", member.on_a_string.name)
+        if member.on_a_string is not None:
+            print(member.name, "is on", member.on_a_string.name)
+        else:
+            print(member.name, "was not placed on a committee")
 
 
 if __name__ == '__main__':
